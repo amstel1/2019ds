@@ -1,0 +1,33 @@
+def aggregate_transactions(trans, prefix):  
+    trans.loc[:, 'purchase_date'] = pd.DatetimeIndex(trans['purchase_date']).\
+                                      astype(np.int64) * 1e-9
+    
+    agg_func = {
+        'authorized_flag': ['sum', 'mean'],
+        'category_1': ['mean'],
+        'category_2_1.0': ['mean'],
+        'category_2_2.0': ['mean'],
+        'category_2_3.0': ['mean'],
+        'category_2_4.0': ['mean'],
+        'category_2_5.0': ['mean'],
+        'category_3_A': ['mean'],
+        'category_3_B': ['mean'],
+        'category_3_C': ['mean'],
+        'merchant_id': ['nunique'],
+        'purchase_amount': ['sum', 'mean', 'max', 'min', 'std'],
+        'installments': ['sum', 'mean', 'max', 'min', 'std'],
+        'purchase_date': [np.ptp],
+        'month_lag': ['min', 'max']
+    }
+    agg_trans = trans.groupby(['card_id']).agg(agg_func)
+    agg_trans.columns = [prefix + '_'.join(col).strip() 
+                           for col in agg_trans.columns.values]
+    agg_trans.reset_index(inplace=True)
+    
+    df = (trans.groupby('card_id')
+          .size()
+          .reset_index(name='{}transactions_count'.format(prefix)))
+    
+    agg_trans = pd.merge(df, agg_trans, on='card_id', how='left')
+    
+    return agg_trans
