@@ -1,0 +1,137 @@
+import pandas as pd
+import numpy as np
+
+df1 = pd.read_excel('part1.xlsx')
+
+df2 = pd.read_excel('part2.xlsx')
+
+df1.reset_index(drop = True, inplace=True)
+
+df2.reset_index(drop = True, inplace=True)
+
+df = pd.DataFrame()
+
+df = df1.append(df2)
+
+df['tbd'] = 0
+
+df['ll'] = df.last_name_lat.apply(lambda x: len(x))
+df['rl'] = df.last_name_rus.apply(lambda x: len(x))
+
+for i in del_len:
+    df.tbd[df.ll == i] = 1
+    df.tbd[df.rl == i] = 1
+
+df.drop(labels = df[df.tbd == 1].index, inplace = True)
+
+df.drop(['tbd', 'll', 'rl'], inplace=True, axis =1)
+
+df.drop(df[df.last_name_lat.str.contains(' ')].index, inplace=True)
+df.last_name_lat = df.last_name_lat.str.replace('\.','')
+
+#максимальная длина имени
+max_l= max(max([len(x) for x in df.last_name_lat.str[:]]), max([len(x) for x in df.last_name_rus.str[:]]))
+import string
+string.ascii_uppercase
+eng_alph = '_ABCDEFGHIJKLMNOPQRSTUVWXYZ\''
+rus_alph = '_АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЫЬЪЭФЮЯ'
+eng_c2i = dict((c, i) for i, c in enumerate(eng_alph))
+eng_i2c = dict((i, c) for i, c in enumerate(eng_alph))
+rus_c2i = dict((c, i) for i, c in enumerate(rus_alph))
+rus_i2c = dict((i, c) for i, c in enumerate(rus_alph))
+
+import datetime
+rus_enc = np.zeros((len(df),max_len_char,max_len_alph),dtype = 'uint8')
+eng_enc = np.zeros((len(df),max_len_char,max_len_alph),dtype = 'uint8')
+#i - row
+#j - symbol position
+#k - character encoding
+
+for i in range(len(df)):
+    len_df_iloc_i0 = len(df.iloc[i,0])
+    len_df_iloc_i1 = len(df.iloc[i,1])
+    
+    
+    if i%100000 ==0:
+        print(i, datetime.datetime.now())
+        
+    for j in range(max_len_char):
+        if len_df_iloc_i0>j:
+            rus_c2i_df_iloc_i0_j = rus_c2i[df.iloc[i,0][j]]
+            
+        if len_df_iloc_i1>j:
+            eng_c2i_df_iloc_i1_j=eng_c2i[df.iloc[i,1][j]]
+        
+        for k in range(max_len_alph):
+            if len_df_iloc_i0>j and k==rus_c2i_df_iloc_i0_j:
+                rus_enc[i,j,k] = 1
+            else:
+                pass
+                #rus_enc[i,j,k] = 0
+            
+            if len_df_iloc_i1>j and k==eng_c2i_df_iloc_i1_j:
+                eng_enc[i,j,k] = 1
+            else:
+                pass
+                #eng_enc[i,j,k] = 0
+                
+print(eng_enc.shape)
+print(rus_enc.shape)
+
+np.save('rus.npy', rus_enc)
+np.save('lat.npy', eng_enc)
+
+
+#######################################################
+
+rus_enc = np.load('rus.npy')
+eng_enc = np.load('eng.npy')
+
+import keras
+from keras.models import Sequential
+from keras.layers import CuDNNGRU, CuDNNLSTM, SimpleRNN, Dense, Dropout, Bidirectional, BatchNormalization
+from keras.callbacks import EarlyStopping, TensorBoard
+from keras.regularizers import l1, l2, L1L2
+from keras.optimizers import Adam
+
+#проект функции по переводу
+bdfr_cols = [x for x in eng_alph]
+[bdfr_cols.append("?") for i in range(7)]
+
+def mytranslate(model, word):
+    b = np.zeros(eng_enc.shape[1:])
+    for ix, char in enumerate(word):
+        b[ix, rus_c2i[char]] = 1
+    b = b.reshape((1, eng_enc.shape[1], eng_enc.shape[2]))
+    predicted = model.predict(b)
+    predicted = predicted.reshape(eng_enc.shape[1:])
+    dfr = pd.DataFrame(predicted, columns=bdfr_cols)
+    dfr.to_excel(word +'.xlsx')
+    dfr = round(dfr)
+    answer = []
+    for i, _ in dfr.iterrows():
+        try:
+            answer.append(dfr.loc[i,:][dfr.loc[i,:]==1].index[0])
+        except:
+            pass
+    return print(''.join(answer))
+   
+model = Sequential()
+
+model.add(Bidirectional(CuDNNGRU(64, input_shape = rus_enc.shape[1:],  return_sequences = True, go_backwards =False)))
+model.add((CuDNNGRU(128,  return_sequences = True, go_backwards =False)))
+model.add((CuDNNGRU(128,  return_sequences = True, go_backwards =False)))
+model.add(Dense(rus_enc.shape[2], activation = 'softmax'))
+
+model.compile(loss = 'categorical_crossentropy',optimizer= Adam(), metrics = ['acc'])
+model.fit(rus_enc, eng_enc, epochs=4, batch_size =128,  validation_split = 0.2, shuffle = True,
+          callbacks = [EarlyStopping(patience=2,  restore_best_weights=True)])
+
+mytranslate(model, 'СЕМЕНЮК')
+mytranslate(model, 'ШЕВЧЕНКО')
+mytranslate(model, 'САВЧЕНКО')
+mytranslate(model, 'ИВАНОВ')
+mytranslate(model, 'ПЕТРОВ')
+mytranslate(model, 'ПЕТРОВА')
+
+model.save('the_best_03032019_1654_vallos_0_0987.h5')
